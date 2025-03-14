@@ -1,4 +1,6 @@
 spring:
+  application:
+    name: menu-service
   datasource:
     url: jdbc:h2:mem:menu_db;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
     driver-class-name: org.h2.Driver
@@ -13,6 +15,23 @@ spring:
     console:
       enabled: true
       path: /h2-console
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, metrics, prometheus
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+  tracing:
+    sampling:
+      probability: 1.0  # Sample all requests for tracing
+  otlp:
+    tracing:
+      timeout: 10s
+      endpoint: http://localhost:4318/v1/traces
 
 logging:
   level:

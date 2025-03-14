@@ -4,6 +4,7 @@ package com.fabiankevin.menu_items_service.persistence;
 import com.fabiankevin.menu_items_service.models.MenuItem;
 import com.fabiankevin.menu_items_service.persistence.entites.MenuItemEntity;
 import com.fabiankevin.menu_items_service.persistence.jpa.JpaMenuItemRepository;
+import io.micrometer.observation.annotation.Observed;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
