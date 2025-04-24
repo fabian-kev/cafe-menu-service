@@ -1,0 +1,136 @@
+stages:
+  # Existing Integration Test Stage (from previous example)
+  - stage: IntegrationTest
+    displayName: 'Run Integration Tests with Testcontainers'
+    jobs:
+      - job: RunIntegrationTests
+        displayName: 'Run Integration Tests'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - script: |
+              sudo apt-get update
+              sudo apt-get install -y docker.io
+              sudo systemctl start docker
+              sudo systemctl enable docker
+            displayName: 'Install Docker'
+          - task: Cache@2
+            inputs:
+              key: 'docker | "$(Agent.OS)" | "$(Build.SourceVersion)" | testcontainers'
+              restoreKeys: |
+                docker | "$(Agent.OS)"
+              path: '$(Pipeline.Workspace)/docker-cache'
+              cacheHitVar: 'DOCKER_CACHE_HIT'
+            displayName: 'Cache Testcontainers Docker Images'
+          - script: |
+              if [ "$DOCKER_CACHE_HIT" == "true" ]; then
+                echo "Cache hit, loading Docker images from cache..."
+                for tar_file in $(Pipeline.Workspace)/docker-cache/*.tar; do
+                  if [ -f "$tar_file" ]; then
+                    docker load -i "$tar_file"
+                  fi
+                done
+              else
+                echo "Cache miss, pulling Testcontainers images..."
+                docker pull postgres:15
+              fi
+            displayName: 'Load or Pull Testcontainers Images'
+            env:
+              DOCKER_CACHE_HIT: $(DOCKER_CACHE_HIT)
+          - script: |
+              mkdir -p $(Pipeline.Workspace)/docker-cache
+              docker save -o $(Pipeline.Workspace)/docker-cache/postgres.tar postgres:15
+            displayName: 'Save Testcontainers Images to Cache'
+            condition: succeeded()
+          - task: Maven@3
+            inputs:
+              mavenPomFile: 'pom.xml'
+              goals: 'test'
+              options: '-Pintegration-tests'
+              publishJUnitResults: true
+              testResultsFiles: '**/surefire-reports/TEST-*.xml'
+              javaHomeOption: 'JDKVersion'
+            displayName: 'Run Integration Tests with Testcontainers'
+
+  # New Stage: Release Start
+  - stage: ReleaseStart
+    displayName: 'Start Maven Gitflow Release'
+    dependsOn: IntegrationTest
+    condition: succeeded()
+    jobs:
+      - job: StartRelease
+        displayName: 'Run gitflow:release-start'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          # Step 1: Checkout Repository with Full History
+          - checkout: self
+            fetchDepth: 0
+            persistCredentials: true
+
+          # Step 2: Configure Git
+          - script: |
+              git config --global user.email "azure-pipeline@yourdomain.com"
+              git config --global user.name "Azure Pipeline"
+            displayName: 'Configure Git'
+
+          # Step 3: Run Maven Gitflow Release Start
+          - task: Maven@3
+            inputs:
+              mavenPomFile: 'pom.xml'
+              goals: 'gitflow:release-start'
+              options: '-B -DskipTests'
+              javaHomeOption: 'JDKVersion'
+            displayName: 'Run Maven gitflow:release-start'
+            env:
+              GIT_ASKPASS: '$(System.AccessToken)'
+              GIT_USERNAME: '$(Build.RequestedBy)'
+              GIT_PASSWORD: '$(System.AccessToken)'
+
+  # New Stage: Release Finish (with Manual Validation)
+  - stage: ReleaseFinish
+    displayName: 'Finish Maven Gitflow Release'
+    dependsOn: ReleaseStart
+    condition: succeeded()
+    jobs:
+      - job: ApproveRelease
+        displayName: 'Manual Approval for Release'
+        pool: server
+        steps:
+          # Step 4: Manual Validation
+          - task: ManualValidation@0
+            inputs:
+              notifyUsers: 'your-team@yourdomain.com'
+              instructions: 'Please review and merge the release branch (e.g., release/1.0.0) into master, then approve to proceed with gitflow:release-finish.'
+              onTimeout: 'reject'
+            displayName: 'Wait for Manual Approval'
+
+      - job: FinishRelease
+        displayName: 'Run gitflow:release-finish'
+        dependsOn: ApproveRelease
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          # Step 5: Checkout Repository with Full History
+          - checkout: self
+            fetchDepth: 0
+            persistCredentials: true
+
+          # Step 6: Configure Git
+          - script: |
+              git config --global user.email "azure-pipeline@yourdomain.com"
+              git config --global user.name "Azure Pipeline"
+            displayName: 'Configure Git'
+
+          # Step 7: Run Maven Gitflow Release Finish
+          - task: Maven@3
+            inputs:
+              mavenPomFile: 'pom.xml'
+              goals: 'gitflow:release-finish'
+              options: '-B -DskipTests'
+              javaHomeOption: 'JDKVersion'
+            displayName: 'Run Maven gitflow:release-finish'
+            env:
+              GIT_ASKPASS: '$(System.AccessToken)'
+              GIT_USERNAME: '$(Build.RequestedBy)'
+              GIT_PASSWORD: '$(System.AccessToken)'
